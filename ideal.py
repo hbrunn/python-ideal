@@ -253,22 +253,20 @@ class IDEALConnector(object):
 
 
     def request_transaction(self, issuer_id, purchase_id, amount, 
-                               description, entrance_code, 
-                               expiration_period=None, 
-                               merchant_return_url=None):
+                            description, entrance_code, 
+                            return_url, expiration_period=None):
         '''Request to make a transaction'''
         expiration_period = expiration_period or 'PT10M'
-        merchant_return_url = merchant_return_url or 'http://www.pythonheads.nl/'
         response = self.acquirer.do_request(
             AcquirerTrxReq(self.merchant, issuer_id, purchase_id, amount, description, 
-                           entrance_code, expiration_period, merchant_return_url))
+                           entrance_code, expiration_period, return_url))
         
         return AcquirerTrxRes(
             acquirer_id=response.xpath('/AcquirerTrxRes/Acquirer/acquirerID/child::text()')[0],
             issuer_authentication_url=response.xpath('/AcquirerTrxRes/Issuer/issuerAuthenticationURL/child::text()')[0],
             transaction_id=response.xpath('/AcquirerTrxRes/Transaction/transactionID/child::text()')[0],
             purchase_id=response.xpath('/AcquirerTrxRes/Transaction/purchaseID/child::text()')[0])
-
+    
     def request_transaction_status(self, transaction_id):
         '''Request the status of a transaction'''
         response = self.acquirer.do_request(AcquirerStatusReq(self.merchant, transaction_id))
@@ -291,10 +289,10 @@ class IDEALConnector(object):
         if not self.acquirer.verify_message(fingerprint, signature, sign_fields):
             raise IDealException('Transaction status is possibly forged')
         
-        AcquirerStatusRes(acquirer_id=acquirer_id,
-                          transaction_id=transaction_id,
-                          status=status,
-                          consumer_name=consumer_name,
-                          consumer_account_number=consumer_account_number,
-                          consumer_city=consumer_city)
- 
+        return AcquirerStatusRes(acquirer_id=acquirer_id,
+                                 transaction_id=transaction_id,
+                                 status=status,
+                                 consumer_name=consumer_name,
+                                 consumer_account_number=consumer_account_number,
+                                 consumer_city=consumer_city)
+         
