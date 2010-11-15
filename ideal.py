@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Copyright (C) 2010 Pythonheads, all rights reserved.
-
+ 
 '''
 A single module pythonic iDeal module.
 
@@ -27,6 +27,7 @@ ENCODING = 'utf-8'
 Issuer = namedtuple('Issuer', 'id list_type name')
 AcquirerTrxRes = namedtuple('AcquirerTrxRes', 'acquirer_id issuer_authentication_url transaction_id purchase_id')
 AcquirerStatusRes = namedtuple('AcquirerStatusRes', 'acquirer_id transaction_id status consumer_name consumer_account_number consumer_city')
+Consumer = namedtuple('Consumer', 'consumer_name account_number city')		
 
 class IDealException(Exception): pass
 
@@ -251,7 +252,6 @@ class IDEALConnector(object):
 							 	  list_type=issuer.xpath('issuerList/child::text()')[0])
 		return issuers
 
-
 	def request_transaction(self, issuer_id, purchase_id, amount, 
 							   description, entrance_code, 
 							   expiration_period=None, 
@@ -281,12 +281,17 @@ class IDEALConnector(object):
 			consumer_name = response.xpath('/AcquirerStatusRes/Transaction/consumerName/child::text()')[0]
 			consumer_account_number = response.xpath('/AcquirerStatusRes/Transaction/consumerAccountNumber/child::text()')[0]
 			consumer_city = response.xpath('/AcquirerStatusRes/Transaction/consumerCity/child::text()')[0]
+			consumer = Consumer(name=consumer_name, 
+								account_number=consumer_account_number,
+								city=consumer_city)
+		else:
+			consumer = None
 		signature = response.xpath('/AcquirerStatusRes/Signature/signatureValue/child::text()')[0]
 		fingerprint = response.xpath('/AcquirerStatusRes/Signature/fingerprint/child::text()')[0]
 		
 		sign_fields = [timestamp, transaction_id, status]
 		if status == 'Success':
-			sign_fields += [consumer_account_number,]
+			sign_fields += [consumer.account_number,]
 				
 		if not self.acquirer.verify_message(fingerprint, signature, sign_fields):
 			raise IDealException('Transaction status is possibly forged')
@@ -294,7 +299,5 @@ class IDEALConnector(object):
 		AcquirerStatusRes(acquirer_id=acquirer_id,
 						  transaction_id=transaction_id,
 						  status=status,
-						  consumer_name=consumer_name,
-						  consumer_account_number=consumer_account_number,
-						  consumer_city=consumer_city)
+						  consumer=consumer)
  
