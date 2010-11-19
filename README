@@ -6,6 +6,9 @@ We werent able to find an iDeal client implementation for Python, besides
 PayDeal which appears to be a literal translation of the PHP reference
 client. This client aims to be a bit more Pythonic.
 
+See your iDeal implementation docs for more info about iDeal and the
+way it works.
+
 Dependencies
 ------------
 * lxml
@@ -14,3 +17,23 @@ Dependencies
 The module has been run using python 2.6.5 and 2.5.2 deployments, but other 
 versions might work as well.
 
+Example
+-------
+Example usage (taken from a Django project).
+
+acquirer = Acquirer(endpoint=settings.IDEAL_ACQUIRER_ENDPOINT,
+                    cert=Cert(settings.IDEAL_ACQUIRER_CERT))
+
+merchant = Merchant(merchant_id=settings.IDEAL_MERCHANT_ID,
+                    sub_id=settings.IDEAL_MERCHANT_SUBID,
+                    cert=Cert(settings.IDEAL_MERCHANT_CERT),
+                    pem=Pem(settings.IDEAL_MERCHANT_PEM, settings.IDEAL_MERCHANT_PEM_PASSWORD))
+
+connector = IDEALConnector(merchant=merchant, acquirer=acquirer)
+
+# Can now use
+connector.get_issuer_list()
+connector.request_transaction(self, issuer_id, purchase_id, amount, 
+                              description, entrance_code, 
+                              return_url)
+connector.request_transaction_status(self, transaction_id)
