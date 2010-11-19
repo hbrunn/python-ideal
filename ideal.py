@@ -12,7 +12,6 @@ import re
 import urllib2
 import base64
 
-from collections import namedtuple
 import M2Crypto.EVP
 from lxml import etree
 from lxml.etree import Element
@@ -24,9 +23,7 @@ log = logging.getLogger(__name__)
 
 ENCODING = 'utf-8'
 
-Issuer = namedtuple('Issuer', 'id list_type name')
-AcquirerTrxRes = namedtuple('AcquirerTrxRes', 'acquirer_id issuer_authentication_url transaction_id purchase_id')
-AcquirerStatusRes = namedtuple('AcquirerStatusRes', 'acquirer_id transaction_id status consumer_name consumer_account_number consumer_city')
+### Exceptions ###
 
 class IDealException(Exception): pass
 
@@ -41,6 +38,8 @@ class IDealErrorRes(IDealException):
         self.consumer_message = consumer_message
         summary = '%s: %s (%s)' % (error_code, error_message, error_detail)
         super(IDealException, self).__init__(summary)
+
+### Security objects ###
 
 class Cert(object):
     def __init__(self, path):
@@ -75,6 +74,30 @@ class Pem(object):
         gist = re.sub(' |\t|\n', '', ''.join([unicode(s) for s in args]))       
         log.debug('gist is: %s', gist)
         return base64.b64encode(self.sign(gist))
+
+### Objects used in requests & responses ###
+
+class Issuer(object):
+    def __init__(self, id, list_type, name):
+        self.id = id
+        self.list_type = list_type
+        self.name = name
+
+class AcquirerTrxRes(object):
+    def __init__(self, acquirer_id, issuer_authentication_url, transaction_id, purchase_id):
+        self.acquirer_id = acquirer_id
+        self.issuer_authentication_url = issuer_authentication_url
+        self.transaction_id = transaction_id
+        self.purchase_id = purchase_id
+
+class AcquirerStatusRes(object):
+    def __init__(self, acquirer_id, transaction_id, status, consumer_name, consumer_account_number, consumer_city):
+        self.acquirer_id = acquirer_id
+        self.transaction_id = transaction_id
+        self.status = status
+        self.consumer_name = consumer_name
+        self.consumer_account_number = consumer_account_number
+        self.consumer_city = consumer_city
 
 class Acquirer(object):
     def __init__(self, endpoint, cert):
@@ -133,7 +156,7 @@ class Merchant(object):
     def __init__(self, merchant_id, sub_id, cert, pem):
         self.merchant_id = merchant_id
         self.sub_id = sub_id        
-        self.cer = cert
+        self.cert = cert
         self.pem = pem
 
     def to_xml(self, sign_values):
@@ -141,8 +164,10 @@ class Merchant(object):
             E.merchantID(self.merchant_id),
             E.subID(self.sub_id),
             E.authentication('SHA1_RSA'),
-            E.token(self.cer.get_fingerprint()),
+            E.token(self.cert.get_fingerprint()),
             E.tokenCode(self.pem.get_tokencode(*sign_values)))
+
+### Actual requests ###
 
 class Request(object):
     def __init__(self, request_type, merchant):
@@ -233,6 +258,8 @@ class AcquirerStatusReq(Request):
         request = super(AcquirerStatusReq, self).to_xml()       
         request.append(E.Transaction(E.transactionID(self.transaction_id))) 
         return request
+
+### The actual connector ###
 
 class IDEALConnector(object):
     '''A Pythonic iDeal connector'''
