@@ -11,5 +11,6 @@ Dependencies
 * lxml
 * m2crypto
 
-Python 2.6.5 was used during development, but other versions might work as well.
+The module has been run using python 2.6.5 and 2.5.2 deployments, but other 
+versions might work as well.
 
