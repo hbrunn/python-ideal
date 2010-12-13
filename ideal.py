@@ -91,6 +91,8 @@ class AcquirerTrxRes(object):
         self.purchase_id = purchase_id
 
 class AcquirerStatusRes(object):
+    STATUS_CODES = ['Success', 'Cancelled', 'Expired', 'Failure', 'Open']
+
     def __init__(self, acquirer_id, transaction_id, status, consumer_name, consumer_account_number, consumer_city):
         self.acquirer_id = acquirer_id
         self.transaction_id = transaction_id
@@ -98,6 +100,21 @@ class AcquirerStatusRes(object):
         self.consumer_name = consumer_name
         self.consumer_account_number = consumer_account_number
         self.consumer_city = consumer_city
+
+        if self.status not in self.STATUS_CODES:
+            raise IDealException('Unknown status code %s' % (self.status_code))
+
+    def is_open(self):
+        return self.status == 'Open'
+
+    def is_success(self):
+        return self.status == 'Success'
+
+    def is_failed(self):
+        return self.status in ['Expired', 'Failure', 'Cancelled']
+
+    def is_cancelled(self):
+        return self.status == 'Cancelled'
 
 class Acquirer(object):
     def __init__(self, endpoint, cert):
