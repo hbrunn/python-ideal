@@ -323,6 +323,9 @@ class IDEALConnector(object):
             consumer_name = response.xpath('/AcquirerStatusRes/Transaction/consumerName/child::text()')[0]
             consumer_account_number = response.xpath('/AcquirerStatusRes/Transaction/consumerAccountNumber/child::text()')[0]
             consumer_city = response.xpath('/AcquirerStatusRes/Transaction/consumerCity/child::text()')[0]
+        else:
+            consumer_name, consumer_account_number, consumer_city = None, None, None
+            
         signature = response.xpath('/AcquirerStatusRes/Signature/signatureValue/child::text()')[0]
         fingerprint = response.xpath('/AcquirerStatusRes/Signature/fingerprint/child::text()')[0]
         
