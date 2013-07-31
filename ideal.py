@@ -109,25 +109,18 @@ class Acquirer(object):
         self.endpoint = endpoint
         self.cert = cert
 
-    def verify_message(self, fingerprint, signature, args):
-        '''Ensure a response signature is valid'''
-        if not fingerprint == self.cert.get_fingerprint():
-            raise IDealException('Unexpected certificate fingerprint')      
-        gist = re.sub(' |\t|\n', '', ''.join([unicode(s) for s in args]))
-        signature = base64.b64decode(signature)
-        return bool(self.cert.verify_signature(signature, gist))
-    
     def do_request(self, request):
-        '''Post an XML message to iDeal and check the response for errors.'''
+        '''Post an XML message to iDeal, verify the response and check
+        for errors.'''
         tmp = tempfile.NamedTemporaryFile()
-        log.debug(tmp.name)
 
         request_xml = request.to_xml()
         request_xml.append(etree.fromstring(XMLSIG_TEMPLATE))
 
-        data = '<?xml version="1.0" encoding="utf-8"?>\n'+etree.tostring(
+        data = etree.tostring(
                 request_xml,
-                pretty_print=False,
+                pretty_print=True,
+                xml_declaration=True,
                 encoding=ENCODING)
 
         tmp.write(data)
@@ -146,12 +139,10 @@ class Acquirer(object):
         url = re.sub('^ssl://', 'https://', self.endpoint)
         req = urllib2.Request(url=url, data=data)
         res = urllib2.urlopen(req)
-
         tmp.seek(0)
         tmp.truncate()
         tmp.write(res.read())
         tmp.flush()
-
         tmp.seek(0)
         body = tmp.read()
         res.close()
@@ -209,10 +200,6 @@ class Request(object):
         self.request_type = request_type
         self.merchant = merchant
     
-    def get_sign_values(self, timestamp):
-        '''Get the values used for signing this request.'''
-        raise NotImplemented()
-    
     def to_xml(self):       
         '''Convert this request to XML.'''
         timestamp = self._get_iso_timestamp()
@@ -235,9 +222,6 @@ class DirectoryReq(Request):
     def __init__(self, merchant):
         super(DirectoryReq, self).__init__('DirectoryReq', merchant)
     
-    def get_sign_values(self, timestamp):
-        return [timestamp, self.merchant.merchant_id, self.merchant.sub_id] 
-
 class AcquirerTrxReq(Request):
 
     def __init__(self, merchant, issuer_id, purchase_id, amount, description, 
@@ -253,12 +237,6 @@ class AcquirerTrxReq(Request):
         self.currency = 'EUR'
         self.language = 'nl'
     
-    def get_sign_values(self, timestamp):
-        return [timestamp, self.issuer_id, self.merchant.merchant_id, 
-                self.merchant.sub_id, self.merchant_return_url,
-                self.purchase_id, self.amount, self.currency, self.language,
-                self.description, self.entrance_code]
-
     def to_xml(self):
         request = super(AcquirerTrxReq, self).to_xml()      
         request.append(
@@ -285,9 +263,6 @@ class AcquirerStatusReq(Request):
     def __init__(self, merchant, transaction_id):
         super(AcquirerStatusReq, self).__init__('AcquirerStatusReq', merchant)
         self.transaction_id = transaction_id
-
-    def get_sign_values(self, timestamp):       
-        return [timestamp, self.merchant.merchant_id, self.merchant.sub_id, self.transaction_id]
 
     def to_xml(self):
         request = super(AcquirerStatusReq, self).to_xml()       
@@ -344,16 +319,6 @@ class IDEALConnector(object):
         else:
             consumer_name, consumer_account_number, consumer_city = None, None, None
             
-        signature = response.xpath('/AcquirerStatusRes/Signature/signatureValue/child::text()')[0]
-        fingerprint = response.xpath('/AcquirerStatusRes/Signature/fingerprint/child::text()')[0]
-        
-        sign_fields = [timestamp, transaction_id, status]
-        if status == 'Success':
-            sign_fields += [consumer_account_number,]
-                
-        if not self.acquirer.verify_message(fingerprint, signature, sign_fields):
-            raise IDealException('Transaction status is possibly forged')
-        
         return AcquirerStatusRes(acquirer_id=acquirer_id,
                                  transaction_id=transaction_id,
                                  status=status,
