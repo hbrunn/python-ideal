@@ -136,10 +136,9 @@ class Acquirer(object):
         data = subprocess.check_output(
                 ['xmlsec1', 'sign',
                     '--privkey-pem:'+ request.merchant.cert.get_fingerprint(),
-                    request.merchant.pem.path,
-# we need that for verification only
-#                    '--pubkey-cert-pem', self.cert.path,
-                    '--pwd', request.merchant.pem.passwd, tmp.name])
+                        request.merchant.pem.path,
+                    '--pwd', request.merchant.pem.passwd,
+                    tmp.name])
 
         log.debug('write: %s', data)
         
@@ -147,12 +146,28 @@ class Acquirer(object):
         url = re.sub('^ssl://', 'https://', self.endpoint)
         req = urllib2.Request(url=url, data=data)
         res = urllib2.urlopen(req)
-        body = res.read()
+
+        tmp.seek(0)
+        tmp.truncate()
+        tmp.write(res.read())
+        tmp.flush()
+
+        tmp.seek(0)
+        body = tmp.read()
         res.close()
         log.debug('read: %s', body)
 
-        #TODO: call xmlsec1 here to verify fingerprint
-                
+        try:
+            subprocess.check_output(
+                ['xmlsec1', 'verify',
+                    '--pubkey-cert-pem', self.cert.path,
+                    '--print-debug',
+                    tmp.name],
+                stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as output:
+            raise IDealException, output
+
+
         # Get rid of the namespace (or we'll have to suppyl it every time)
         # and parse the response 
         body = re.sub('xmlns=[\'"].+?[\'"]', '', body)      
