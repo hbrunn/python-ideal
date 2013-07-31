@@ -11,8 +11,10 @@ import time
 import re
 import urllib2
 import base64
+import tempfile
+import subprocess
+import M2Crypto
 
-import M2Crypto.EVP
 from lxml import etree
 from lxml.etree import Element
 from lxml.builder import E
@@ -22,6 +24,13 @@ logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger(__name__)
 
 ENCODING = 'utf-8'
+
+XMLSIG_TEMPLATE="""<Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+  <SignedInfo><CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+    <SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>
+  <Reference URI=""><Transforms><Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/></Transforms><DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/><DigestValue></DigestValue></Reference></SignedInfo><SignatureValue/>
+  <KeyInfo><KeyName></KeyName></KeyInfo></Signature>"""
+
 
 ### Exceptions ###
 
@@ -43,38 +52,17 @@ class IDealErrorRes(IDealException):
 
 class Cert(object):
     def __init__(self, path):
+        self.path = path
         self.cert = M2Crypto.X509.load_cert(path)
-        
+
     def get_fingerprint(self):
         return self.cert.get_fingerprint('sha1').zfill(40)
-
-    def verify_signature(self, signature, message):
-        """Verify an aquirer message signature"""               
-        pubkey = self.cert.get_pubkey()
-        pubkey.verify_init()
-        pubkey.verify_update(message.encode(ENCODING))
-        return pubkey.verify_final(signature)
-
+        
 class Pem(object):
     def __init__(self, path, passwd):
-        self.pkey = M2Crypto.EVP.load_key(path, lambda x: passwd)
+        self.path = path
+        self.passwd = passwd
     
-    def sign(self, message):
-        '''Create an iDeal signature for the specified message'''
-        # Encoding is important because signing is a binary operation and will 
-        # produce different results based on the encoding
-        message = message.encode(ENCODING)      
-        self.pkey.sign_init()
-        self.pkey.sign_update(message)
-        signature = self.pkey.final()       
-        return signature
-
-    def get_tokencode(self, *args):
-        '''Get the base64 encoded tokencode'''
-        gist = re.sub(' |\t|\n', '', ''.join([unicode(s) for s in args]))       
-        log.debug('gist is: %s', gist)
-        return base64.b64encode(self.sign(gist))
-
 ### Objects used in requests & responses ###
 
 class Issuer(object):
@@ -130,13 +118,29 @@ class Acquirer(object):
         return bool(self.cert.verify_signature(signature, gist))
     
     def do_request(self, request):
-        '''Post an XML message to iDeal and check the response for errors.'''   
-            
-        # Since iDeal does not actually seem to use an xml parser on the server 
-        # side, some strings (like the xml preamble) have to be manually 
-        # specified.        
-        data = etree.tostring(request.to_xml(), pretty_print=True, encoding=ENCODING) # xml_declaration=True)       
-        data = '<?xml version="1.0" encoding="UTF-8"?>\n' + data
+        '''Post an XML message to iDeal and check the response for errors.'''
+        tmp = tempfile.NamedTemporaryFile()
+        log.debug(tmp.name)
+
+        request_xml = request.to_xml()
+        request_xml.append(etree.fromstring(XMLSIG_TEMPLATE))
+
+        data = '<?xml version="1.0" encoding="utf-8"?>\n'+etree.tostring(
+                request_xml,
+                pretty_print=False,
+                encoding=ENCODING)
+
+        tmp.write(data)
+        tmp.flush()
+
+        data = subprocess.check_output(
+                ['xmlsec1', 'sign',
+                    '--privkey-pem:'+ request.merchant.cert.get_fingerprint(),
+                    request.merchant.pem.path,
+# we need that for verification only
+#                    '--pubkey-cert-pem', self.cert.path,
+                    '--pwd', request.merchant.pem.passwd, tmp.name])
+
         log.debug('write: %s', data)
         
         # Call the server
@@ -146,6 +150,8 @@ class Acquirer(object):
         body = res.read()
         res.close()
         log.debug('read: %s', body)
+
+        #TODO: call xmlsec1 here to verify fingerprint
                 
         # Get rid of the namespace (or we'll have to suppyl it every time)
         # and parse the response 
@@ -154,12 +160,12 @@ class Acquirer(object):
         
         # Check for errors, this means getting either an error response or
         # a response without an acquirer ID.
-        if xml.xpath('/ErrorRes'):
+        if xml.xpath('/*/Error'):
             raise IDealErrorRes(
-                error_code=xml.xpath('/ErrorRes/Error/errorCode/child::text()')[0],
-                error_message=xml.xpath('/ErrorRes/Error/errorMessage/child::text()')[0],
-                error_detail=xml.xpath('/ErrorRes/Error/errorDetail/child::text()')[0],
-                consumer_message=xml.xpath('/ErrorRes/Error/consumerMessage/child::text()')[0])
+                error_code=xml.xpath('//Error/errorCode/child::text()')[0],
+                error_message=xml.xpath('//Error/errorMessage/child::text()')[0],
+                error_detail=xml.xpath('//Error/errorDetail/child::text()')[0],
+                consumer_message=xml.xpath('//Error/consumerMessage/child::text()')[0])
         elif not xml.xpath('//Acquirer/acquirerID'):
             raise IDealException('No acquirer id in response')
 
@@ -176,13 +182,10 @@ class Merchant(object):
         self.cert = cert
         self.pem = pem
 
-    def to_xml(self, sign_values):
+    def to_xml(self):
         return E.Merchant(
             E.merchantID(self.merchant_id),
-            E.subID(self.sub_id),
-            E.authentication('SHA1_RSA'),
-            E.token(self.cert.get_fingerprint()),
-            E.tokenCode(self.pem.get_tokencode(*sign_values)))
+            E.subID(self.sub_id))
 
 ### Actual requests ###
 
@@ -198,14 +201,14 @@ class Request(object):
     def to_xml(self):       
         '''Convert this request to XML.'''
         timestamp = self._get_iso_timestamp()
-        sign_values = self.get_sign_values(timestamp)       
-        log.debug('Sign using %s', sign_values)
         
-        request = Element(self.request_type,
-                          version="1.1.0",
-                          xmlns="http://www.idealdesk.com/Message")
-        request.append(E.createDateTimeStamp(timestamp))
-        request.append(self.merchant.to_xml(sign_values))       
+        request = Element(
+                self.request_type,
+                version="3.3.1",
+                xmlns="http://www.idealdesk.com/ideal/messages/mer-acq/3.3.1",
+                )
+        request.append(E.createDateTimestamp(timestamp))
+        request.append(self.merchant.to_xml()) 
         return request
 
     def _get_iso_timestamp(self):
@@ -315,7 +318,7 @@ class IDEALConnector(object):
         '''Request the status of a transaction'''
         response = self.acquirer.do_request(AcquirerStatusReq(self.merchant, transaction_id))
         
-        timestamp = response.xpath('/AcquirerStatusRes/createDateTimeStamp/child::text()')[0]
+        timestamp = response.xpath('/AcquirerStatusRes/createDateTimestamp/child::text()')[0]
         acquirer_id = response.xpath('/AcquirerStatusRes/Acquirer/acquirerID/child::text()')[0]
         transaction_id = response.xpath('/AcquirerStatusRes/Transaction/transactionID/child::text()')[0]
         status = response.xpath('/AcquirerStatusRes/Transaction/status/child::text()')[0]       
