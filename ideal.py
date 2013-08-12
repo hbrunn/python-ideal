@@ -81,12 +81,15 @@ class AcquirerTrxRes(object):
 class AcquirerStatusRes(object):
     STATUS_CODES = ['Success', 'Cancelled', 'Expired', 'Failure', 'Open']
 
-    def __init__(self, acquirer_id, transaction_id, status, consumer_name, consumer_account_number, consumer_city):
+    def __init__(self, acquirer_id, transaction_id, status, consumer_name,
+                 consumer_iban, consumer_bic, consumer_city=None):
         self.acquirer_id = acquirer_id
         self.transaction_id = transaction_id
         self.status = status
         self.consumer_name = consumer_name
-        self.consumer_account_number = consumer_account_number
+        self.consumer_iban = consumer_iban
+        self.consumer_account_number = consumer_iban
+        self.consumer_bic = consumer_bic
         self.consumer_city = consumer_city
 
         if self.status not in self.STATUS_CODES:
@@ -134,7 +137,7 @@ class Acquirer(object):
                     tmp.name])
 
         log.debug('write: %s', data)
-        
+
         # Call the server
         url = re.sub('^ssl://', 'https://', self.endpoint)
         req = urllib2.Request(url=url, data=data)
@@ -239,11 +242,11 @@ class AcquirerTrxReq(Request):
     
     def to_xml(self):
         request = super(AcquirerTrxReq, self).to_xml()      
-        request.append(
+        request.insert(1,
             E.Issuer(
                 E.issuerID(self.issuer_id)
             )
-        )       
+        )
         request.append(
             E.Transaction(
                 E.purchaseID(self.purchase_id),
@@ -279,13 +282,20 @@ class IDEALConnector(object):
         self.acquirer = acquirer
 
     def get_issuer_list(self):
-        response = self.acquirer.do_request(DirectoryReq(self.merchant))                
+        response = self.acquirer.do_request(DirectoryReq(self.merchant))
         issuers = []
-        for issuer in response.xpath('Directory/Issuer'):
+        for issuer in response.xpath('Directory/Country/Issuer'):
             if issuer.tag == 'Issuer':
-                issuers += [Issuer(id=issuer.xpath('issuerID/child::text()')[0],
-                                   name=issuer.xpath('issuerName/child::text()')[0],
-                                   list_type=issuer.xpath('issuerList/child::text()')[0]),]
+                issuers.append(
+                    Issuer(
+                        id=unicode(issuer.xpath('issuerID/child::text()')[0]),
+                        name=unicode(
+                            issuer.xpath('issuerName/child::text()')[0]),
+                        list_type=unicode(
+                            issuer.xpath(
+                                'parent::node()/countryNames/child::text()')[0])
+                        )
+                    )
         return issuers
 
 
@@ -299,30 +309,58 @@ class IDEALConnector(object):
                            entrance_code, expiration_period, return_url))
         
         return AcquirerTrxRes(
-            acquirer_id=response.xpath('/AcquirerTrxRes/Acquirer/acquirerID/child::text()')[0],
-            issuer_authentication_url=response.xpath('/AcquirerTrxRes/Issuer/issuerAuthenticationURL/child::text()')[0],
-            transaction_id=response.xpath('/AcquirerTrxRes/Transaction/transactionID/child::text()')[0],
-            purchase_id=response.xpath('/AcquirerTrxRes/Transaction/purchaseID/child::text()')[0])
+            acquirer_id = unicode(
+                response.xpath(
+                    '/AcquirerTrxRes/Acquirer/acquirerID/child::text()')[0]),
+            issuer_authentication_url = unicode(
+                response.xpath(
+                    '/AcquirerTrxRes/Issuer/issuerAuthenticationURL/'
+                    'child::text()')[0]),
+            transaction_id = unicode(
+                response.xpath(
+                    '/AcquirerTrxRes/Transaction/transactionID/'
+                    'child::text()')[0]),
+            purchase_id = unicode(
+                response.xpath(
+                    '/AcquirerTrxRes/Transaction/purchaseID/child::text()')[0]))
     
     def request_transaction_status(self, transaction_id):
         '''Request the status of a transaction'''
-        response = self.acquirer.do_request(AcquirerStatusReq(self.merchant, transaction_id))
+        response = self.acquirer.do_request(AcquirerStatusReq(
+            self.merchant, transaction_id))
         
-        timestamp = response.xpath('/AcquirerStatusRes/createDateTimestamp/child::text()')[0]
-        acquirer_id = response.xpath('/AcquirerStatusRes/Acquirer/acquirerID/child::text()')[0]
-        transaction_id = response.xpath('/AcquirerStatusRes/Transaction/transactionID/child::text()')[0]
-        status = response.xpath('/AcquirerStatusRes/Transaction/status/child::text()')[0]       
+        timestamp = unicode(
+                response.xpath(
+                    '/AcquirerStatusRes/createDateTimestamp/child::text()')[0])
+        acquirer_id = unicode(
+                response.xpath(
+                    '/AcquirerStatusRes/Acquirer/acquirerID/child::text()')[0])
+        transaction_id = unicode(
+                response.xpath(
+                    '/AcquirerStatusRes/Transaction/transactionID/'
+                    'child::text()')[0])
+        status = unicode(
+                response.xpath(
+                    '/AcquirerStatusRes/Transaction/status/child::text()')[0])
         if status == 'Success':     
-            consumer_name = response.xpath('/AcquirerStatusRes/Transaction/consumerName/child::text()')[0]
-            consumer_account_number = response.xpath('/AcquirerStatusRes/Transaction/consumerAccountNumber/child::text()')[0]
-            consumer_city = response.xpath('/AcquirerStatusRes/Transaction/consumerCity/child::text()')[0]
+            consumer_name = unicode(
+                response.xpath(
+                        '/AcquirerStatusRes/Transaction/consumerName/'
+                        'child::text()')[0])
+            consumer_iban = response.xpath(
+                        '/AcquirerStatusRes/Transaction/consumerIBAN/'
+                        'child::text()')[0]
+            consumer_bic = unicode(
+                    response.xpath('/AcquirerStatusRes/Transaction/consumerBIC/'
+                        'child::text()')[0])
         else:
-            consumer_name, consumer_account_number, consumer_city = None, None, None
+            consumer_name, consumer_iban, consumer_bic = None, None, None
             
         return AcquirerStatusRes(acquirer_id=acquirer_id,
                                  transaction_id=transaction_id,
                                  status=status,
                                  consumer_name=consumer_name,
-                                 consumer_account_number=consumer_account_number,
-                                 consumer_city=consumer_city)
+                                 consumer_iban=consumer_iban,
+                                 consumer_bic=consumer_bic,
+                                 consumer_city=None)
          
