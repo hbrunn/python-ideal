@@ -14,7 +14,7 @@ Dependencies
 * lxml
 * m2crypto
 
-The module has been run using python 2.6.5 and 2.5.2 deployments, but other 
+The module has been run using python 2.6.5 and 2.5.2 deployments, but other
 versions might work as well.
 
 Example
@@ -33,7 +33,16 @@ connector = IDEALConnector(merchant=merchant, acquirer=acquirer)
 
 # Can now use
 connector.get_issuer_list()
-connector.request_transaction(self, issuer_id, purchase_id, amount, 
-                              description, entrance_code, 
+connector.request_transaction(self, issuer_id, purchase_id, amount,
+                              description, entrance_code,
                               return_url)
 connector.request_transaction_status(self, transaction_id)
+
+Problem?
+--------
+You will probably have issues on Ubuntu with M2Crypto, specifically the error:
+
+    _m2crypto.so: undefined symbol: SSLv2_method
+
+Use this script to install M2Crypto in your virtualenv and all will be fine
+https://github.com/Motiejus/django-webtopay/blob/master/m2crypto_ubuntu
