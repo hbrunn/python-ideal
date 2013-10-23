@@ -13,6 +13,7 @@ Dependencies
 ------------
 * lxml
 * m2crypto
+* xmlsec (non-python, http://www.aleksey.com/xmlsec/)
 
 The module has been run using python 2.6.5 and 2.5.2 deployments, but other
 versions might work as well.
