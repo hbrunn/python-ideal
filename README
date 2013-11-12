@@ -57,4 +57,7 @@ cat ~/.pydistutils.cfg
 [global]
 include_dirs = /usr/include/x86_64-linux-gnu/
 
-
+Finally, another common problem is forgetting to install xmlsec. This will
+results in a "[Errno 2] No such file or directory" error when calling most
+of the python-ideal functions. To fix this simply install xmlsec. (The package
+is named xmlsec1 on Debian/Ubuntu)
