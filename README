@@ -50,8 +50,8 @@ https://github.com/Motiejus/django-webtopay/blob/master/m2crypto_ubuntu
 
 Additionally, on Ubuntu 13.10+ when building m2crypto it may be unable to
 find openssl/opensslconf.h. This can be fixed by adding the path to it to your
-~/.pydistutils.cfg as shown below. Note that the path may vary based on your
-architecture.
+~/.pydistutils.cfg as shown below. Note that the path to the correct include 
+dir may vary based on your architecture.
 
 cat ~/.pydistutils.cfg
 [global]
