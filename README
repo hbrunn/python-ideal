@@ -47,3 +47,14 @@ You will probably have issues on Ubuntu with M2Crypto, specifically the error:
 
 Use this script to install M2Crypto in your virtualenv and all will be fine
 https://github.com/Motiejus/django-webtopay/blob/master/m2crypto_ubuntu
+
+Additionally, on Ubuntu 13.10+ when building m2crypto it may be unable to
+find openssl/opensslconf.h. This can be fixed by adding the path to it to your
+~/.pydistutils.cfg as shown below. Note that the path may vary based on your
+architecture.
+
+cat ~/.pydistutils.cfg
+[global]
+include_dirs = /usr/include/x86_64-linux-gnu/
+
+
