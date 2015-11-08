@@ -12,11 +12,10 @@ way it works.
 Dependencies
 ------------
 * lxml
-* m2crypto
-* xmlsec (non-python, http://www.aleksey.com/xmlsec/)
+* xmlsec
 
-The module has been run using python 2.6.5 and 2.5.2 deployments, but other
-versions might work as well.
+The module has been run using python 2.7.10, 2.6.5 and 2.5.2 deployments, but
+other versions might work as well.
 
 Example
 -------
@@ -41,23 +40,5 @@ connector.request_transaction_status(self, transaction_id)
 
 Problem?
 --------
-You will probably have issues on Ubuntu with M2Crypto, specifically the error:
-
-    _m2crypto.so: undefined symbol: SSLv2_method
-
-Use this script to install M2Crypto in your virtualenv and all will be fine
-https://github.com/Motiejus/django-webtopay/blob/master/m2crypto_ubuntu
-
-Additionally, on Ubuntu 13.10+ when building m2crypto it may be unable to
-find openssl/opensslconf.h. This can be fixed by adding the path to it to your
-~/.pydistutils.cfg as shown below. Note that the path to the correct include 
-dir may vary based on your architecture.
-
-cat ~/.pydistutils.cfg
-[global]
-include_dirs = /usr/include/x86_64-linux-gnu/
-
-Finally, another common problem is forgetting to install xmlsec. This will
-results in a "[Errno 2] No such file or directory" error when calling most
-of the python-ideal functions. To fix this simply install xmlsec. (The package
-is named xmlsec1 on Debian/Ubuntu)
+If you have problems installing xmlsec, install packages python-pkgconfig and
+libxmlsec1-dev

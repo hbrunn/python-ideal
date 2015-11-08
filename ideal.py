@@ -10,27 +10,17 @@ import logging
 import time
 import re
 import urllib2
-import base64
-import tempfile
-import subprocess
-import M2Crypto
+import xmlsec
+import hashlib
+import ssl
+import os
 
 from lxml import etree
-from lxml.etree import Element
 from lxml.builder import E
 from cStringIO import StringIO
 
 logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger(__name__)
-
-ENCODING = 'utf-8'
-
-XMLSIG_TEMPLATE="""<Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
-  <SignedInfo><CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
-    <SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>
-  <Reference URI=""><Transforms><Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/></Transforms><DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/><DigestValue></DigestValue></Reference></SignedInfo><SignatureValue/>
-  <KeyInfo><KeyName></KeyName></KeyInfo></Signature>"""
-
 
 ### Exceptions ###
 
@@ -53,16 +43,30 @@ class IDealErrorRes(IDealException):
 class Cert(object):
     def __init__(self, path):
         self.path = path
-        self.cert = M2Crypto.X509.load_cert(path)
+        if os.path.isfile(path):
+            self.key = xmlsec.Key.from_file(path, xmlsec.KeyFormat.CERT_PEM)
+            pem_content = open(path, 'rb').read()
+        else:
+            self.key = xmlsec.Key.from_memory(path, xmlsec.KeyFormat.CERT_PEM)
+            pem_content = path
+        h = hashlib.sha1()
+        h.update(ssl.PEM_cert_to_DER_cert(pem_content))
+        self.fingerprint = h.hexdigest().zfill(40)
+
 
     def get_fingerprint(self):
-        return self.cert.get_fingerprint('sha1').zfill(40)
-        
+        return self.fingerprint
+
 class Pem(object):
     def __init__(self, path, passwd):
         self.path = path
-        self.passwd = passwd
-    
+        if os.path.isfile(path):
+            self.key = xmlsec.Key.from_file(path, xmlsec.KeyFormat.PEM,
+                                            password=passwd)
+        else:
+            self.key = xmlsec.Key.from_memory(path, xmlsec.KeyFormat.PEM,
+                                              password=passwd)
+
 ### Objects used in requests & responses ###
 
 class Issuer(object):
@@ -115,58 +119,49 @@ class Acquirer(object):
     def do_request(self, request):
         '''Post an XML message to iDeal, verify the response and check
         for errors.'''
-        tmp = tempfile.NamedTemporaryFile()
-
-        request_xml = request.to_xml()
-        request_xml.append(etree.fromstring(XMLSIG_TEMPLATE))
-
-        data = etree.tostring(
-                request_xml,
-                pretty_print=True,
-                xml_declaration=True,
-                encoding=ENCODING)
-
-        tmp.write(data)
-        tmp.flush()
-
-        data = subprocess.check_output(
-                ['xmlsec1', 'sign',
-                    '--privkey-pem:'+ request.merchant.cert.get_fingerprint(),
-                        request.merchant.pem.path,
-                    '--pwd', request.merchant.pem.passwd,
-                    tmp.name])
-
+        # serialize/deserialize in order to have namespaced nodes,
+        # signing chokes without this
+        request_xml = etree.fromstring(etree.tostring(request.to_xml()))
+        signature_node = xmlsec.template.create(
+            request_xml,
+            xmlsec.Transform.EXCL_C14N,
+            xmlsec.Transform.RSA_SHA256)
+        ref = xmlsec.template.add_reference(
+            signature_node, xmlsec.Transform.SHA256, uri='')
+        xmlsec.template.add_transform(ref, xmlsec.Transform.ENVELOPED)
+        key_info = xmlsec.template.ensure_key_info(signature_node)
+        xmlsec.template.add_key_name(key_info,
+                                     request.merchant.cert.get_fingerprint())
+        request_xml.append(signature_node)
+        ctx = xmlsec.SignatureContext()
+        ctx.key = request.merchant.pem.key
+        ctx.sign(xmlsec.tree.find_node(request_xml, xmlsec.Node.SIGNATURE))
+        data = etree.tostring(request_xml, xml_declaration=True,
+                              encoding='utf-8')
         log.debug('write: %s', data)
 
         # Call the server
         url = re.sub('^ssl://', 'https://', self.endpoint)
         req = urllib2.Request(url=url, data=data)
         res = urllib2.urlopen(req)
-        tmp.seek(0)
-        tmp.truncate()
-        tmp.write(res.read())
-        tmp.flush()
-        tmp.seek(0)
-        body = tmp.read()
+        body = res.read()
         res.close()
         log.debug('read: %s', body)
 
         try:
-            subprocess.check_output(
-                ['xmlsec1', 'verify',
-                    '--pubkey-cert-pem', self.cert.path,
-                    '--print-debug',
-                    tmp.name],
-                stderr=subprocess.STDOUT)
-        except subprocess.CalledProcessError as output:
-            raise IDealException, output
-
+            ctx = xmlsec.SignatureContext()
+            ctx.key = self.cert.key
+            signature_node = xmlsec.tree.find_node(
+                etree.parse(StringIO(body)).getroot(), xmlsec.Node.SIGNATURE)
+            ctx.verify(signature_node)
+        except Exception as output:
+            raise IDealException(output)
 
         # Get rid of the namespace (or we'll have to suppyl it every time)
         # and parse the response 
         body = re.sub('xmlns=[\'"].+?[\'"]', '', body)      
         xml = etree.parse(StringIO(body))
-        
+
         # Check for errors, this means getting either an error response or
         # a response without an acquirer ID.
         if xml.xpath('/*/Error'):
@@ -207,11 +202,11 @@ class Request(object):
         '''Convert this request to XML.'''
         timestamp = self._get_iso_timestamp()
         
-        request = Element(
-                self.request_type,
-                version="3.3.1",
-                xmlns="http://www.idealdesk.com/ideal/messages/mer-acq/3.3.1",
-                )
+        request = E(
+            self.request_type,
+            version="3.3.1",
+            xmlns="http://www.idealdesk.com/ideal/messages/mer-acq/3.3.1",
+        )
         request.append(E.createDateTimestamp(timestamp))
         request.append(self.merchant.to_xml()) 
         return request
